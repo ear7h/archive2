@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
+#![feature(trait_alias)]
 
 use std::{
     collections::HashMap,
@@ -15,6 +16,18 @@ use std::{
 
 use url::Url;
 use ureq;
+
+use ::xml::{
+    reader::{
+        EventReader,
+        XmlEvent,
+    },
+    name::OwnedName,
+    attribute::OwnedAttribute,
+    namespace::Namespace,
+};
+
+mod xml;
 
 struct Artifact<B> {
     timestamp: u64, // unix time
@@ -298,6 +311,7 @@ impl Into<Artifact<Box<dyn io::Read>>> for ureq::Response {
 
 fn main() {
 
+    /*
     let mut fs_arc = FsArchive::new("my-archive".to_string()).unwrap();
 
     Archiver::ret("https://ear7h.net/index.html")
@@ -308,6 +322,29 @@ fn main() {
             // |link| Archive::new(None).http(link))
         .run(&mut fs_arc).unwrap();
 
+
+        */
+    let buf = io::BufReader::new(
+        //"<tag1 attr=\"1\">hello<a href=\"asd\"><tag2 href=\"#hello\">world</tag2></a></tag1>".as_bytes());
+        //"<tag1 attr=\"1\">hello<tag2 href=\"#hello\">world</tag2></tag1>".as_bytes());
+        "<a href=\"1\"><a href=\"2\"><tag1 attr=\"1\">hello<tag2 href=\"#hello\">world</tag2></tag1></a></a>".as_bytes());
+        //"<tag1 attr=\"1\">hello</tag1>".as_bytes());
+        //"<tag2 attr=\"1\">hello</tag2>".as_bytes());
+
+    let r = EventReader::new(buf);
+    let m = xml::Matcher::new(xml::Return::attributes())
+        .tag_eq("tag1".to_string())
+        .and(xml::Matcher::new(xml::Return::attributes())
+           .tag_eq("tag2".to_string()))
+        .or(xml::Matcher::new(xml::Return::attributes())
+            .tag_eq("a".to_string()))
+        .or(xml::Matcher::new(xml::Return::attributes())
+            .tag_eq("tag2".to_string()))
+        .wild();
+
+    for val in m.matches(r) {
+        println!("LOOP:\n{:?}", val);
+    }
 
     println!("done");
 }
