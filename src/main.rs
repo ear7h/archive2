@@ -1,30 +1,18 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
-
 #![feature(trait_alias)]
 
-use std::{
-    collections::HashMap,
-    fs,
-    io,
-    io::Seek,
-    path::PathBuf,
-    path::Path,
-    path,
-};
+use std::{collections::HashMap, fs, io, io::Seek, path, path::Path, path::PathBuf};
 
-use url::Url;
 use ureq;
+use url::Url;
 
 use ::xml::{
-    reader::{
-        EventReader,
-        XmlEvent,
-    },
-    name::OwnedName,
     attribute::OwnedAttribute,
+    name::OwnedName,
     namespace::Namespace,
+    reader::{EventReader, XmlEvent},
 };
 
 mod xml;
@@ -51,7 +39,6 @@ impl<B> Artifact<B> {
     }
 }
 
-
 #[derive(Debug)]
 enum Error {
     Io(io::Error),
@@ -60,11 +47,10 @@ enum Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(e : io::Error) -> Self {
+    fn from(e: io::Error) -> Self {
         Error::Io(e)
     }
 }
-
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -77,18 +63,14 @@ impl FsArchive {
         let pb = dir.as_ref().to_path_buf();
         fs::create_dir_all(pb.as_path())?;
 
-        Ok(Self{
-            dir: pb,
-        })
+        Ok(Self { dir: pb })
     }
 }
 
 impl Archive for FsArchive {
     type BackingFile = fs::File;
 
-    fn catalog<R: io::Read>(&mut self, mut a : Artifact<R>) ->
-        Result<Artifact<Self::BackingFile>>
-    {
+    fn catalog<R: io::Read>(&mut self, mut a: Artifact<R>) -> Result<Artifact<Self::BackingFile>> {
         let mut pb = self.dir.clone();
         pb.push(format!("{}", a.timestamp));
         let u = &a.url;
@@ -110,8 +92,6 @@ impl Archive for FsArchive {
             pb.push("INDEX")
         }
 
-
-
         fs::create_dir_all(pb.parent().unwrap())?;
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -128,71 +108,60 @@ impl Archive for FsArchive {
         Ok(a.with_new_body(file))
     }
 
-    fn catalog_final<R: io::Read>(&mut self, a : Artifact<R>) ->
-        Result<Vec<u8>>
-    {
+    fn catalog_final<R: io::Read>(&mut self, a: Artifact<R>) -> Result<Vec<u8>> {
         let art = self.catalog(a)?;
         Ok(art.id)
     }
 }
 
 trait Archive {
-    type BackingFile : io::Read; // + io::Write
+    type BackingFile: io::Read; // + io::Write
 
-    fn catalog<R: io::Read>(&mut self, a : Artifact<R>) ->
-        Result<Artifact<Self::BackingFile>>;
+    fn catalog<R: io::Read>(&mut self, a: Artifact<R>) -> Result<Artifact<Self::BackingFile>>;
 
-    fn catalog_final<R: io::Read>(&mut self, a : Artifact<R>) ->
-        Result<Vec<u8>>;
+    fn catalog_final<R: io::Read>(&mut self, a: Artifact<R>) -> Result<Vec<u8>>;
 }
 
-
-
-struct Archiver<T, A : Archive> {
+struct Archiver<T, A: Archive> {
     f: Box<dyn FnOnce(&mut A) -> Result<T>>,
 }
 
-
-impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
-
-
-    fn run(self, arc: &mut A) -> Result<T>  {
+impl<T: 'static, A: Archive + 'static> Archiver<T, A> {
+    fn run(self, arc: &mut A) -> Result<T> {
         (self.f)(arc)
     }
 
     fn ret(t: T) -> Self {
         Self {
-            f: Box::new(|arc| {
-                Ok(t)
-            })
+            f: Box::new(|arc| Ok(t)),
         }
     }
 
     fn catalog<R>(self) -> Archiver<Artifact<A::BackingFile>, A>
     where
         R: io::Read,
-        T: Into<Artifact<R>>
+        T: Into<Artifact<R>>,
     {
         Archiver {
             f: Box::new(move |arc| {
                 let inner = (self.f)(arc)?;
                 let art = inner.into();
                 arc.catalog(art)
-            })
+            }),
         }
     }
 
     fn catalog_final<R>(self) -> Archiver<(), A>
     where
         R: io::Read,
-        T: Into<Artifact<R>>
+        T: Into<Artifact<R>>,
     {
         Archiver {
             f: Box::new(move |arc| {
                 let art = (self.f)(arc)?.into();
                 arc.catalog_final(art)?;
                 Ok(())
-            })
+            }),
         }
     }
 
@@ -204,39 +173,35 @@ impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
             f: Box::new(|arc| {
                 let v = (self.f)(arc)?;
                 Ok(f(v))
-            })
+            }),
         }
     }
 
     fn or(self, a: Archiver<T, A>) -> Archiver<T, A> {
-        Archiver{
-            f: Box::new(|arc| {
-                (self.f)(arc).or_else(|_| (a.f)(arc))
-            })
+        Archiver {
+            f: Box::new(|arc| (self.f)(arc).or_else(|_| (a.f)(arc))),
         }
     }
 
-    fn  or_else<F : 'static>(self, f: F) -> Archiver<T, A>
+    fn or_else<F: 'static>(self, f: F) -> Archiver<T, A>
     where
         F: FnOnce() -> Archiver<T, A>,
     {
         Archiver {
-            f: Box::new(|arc| {
-                (self.f)(arc).or_else(|_| (f().f)(arc))
-            })
+            f: Box::new(|arc| (self.f)(arc).or_else(|_| (f().f)(arc))),
         }
     }
 
-    fn and<U : 'static>(self, a: Archiver<U, A>) -> Archiver<U, A> {
-        Archiver{
+    fn and<U: 'static>(self, a: Archiver<U, A>) -> Archiver<U, A> {
+        Archiver {
             f: Box::new(|arc| {
                 (self.f)(arc)?;
                 (a.f)(arc)
-            })
+            }),
         }
     }
 
-    fn and_then<U, F : 'static>(self, f: F) -> Archiver<U, A>
+    fn and_then<U, F: 'static>(self, f: F) -> Archiver<U, A>
     where
         F: FnOnce(T) -> Archiver<U, A>,
     {
@@ -244,7 +209,7 @@ impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
             f: Box::new(|arc| {
                 let t = (self.f)(arc)?;
                 ((f(t)).f)(arc)
-            })
+            }),
         }
     }
 
@@ -256,7 +221,7 @@ impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
     {
         Archiver {
             f: Box::new(move |arc| {
-                let mut ret : Vec<Iu> = Vec::new();
+                let mut ret: Vec<Iu> = Vec::new();
 
                 let it = (self.f)(arc)?;
 
@@ -266,13 +231,13 @@ impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
                 }
 
                 Ok(ret)
-            })
+            }),
         }
     }
 
     fn http_get(self) -> Archiver<ureq::Response, A>
     where
-        T : AsRef<str>,
+        T: AsRef<str>,
     {
         Archiver {
             f: Box::new(|arc| {
@@ -281,23 +246,18 @@ impl<T: 'static, A : Archive + 'static> Archiver<T, A> {
                 let res = ureq::get(s.as_ref()).call();
                 if res.synthetic() {
                     return Err(Error::Ureq(
-                            res
-                                .synthetic_error()
-                                .as_ref()
-                                .unwrap()
-                                .to_string()))
+                        res.synthetic_error().as_ref().unwrap().to_string(),
+                    ));
                 }
 
                 Ok(res)
-            })
+            }),
         }
-
     }
 }
 
 impl Into<Artifact<Box<dyn io::Read>>> for ureq::Response {
     fn into(self) -> Artifact<Box<dyn io::Read>> {
-
         Artifact {
             timestamp: 0,
             url: Url::parse(self.get_url()).unwrap(),
@@ -310,7 +270,6 @@ impl Into<Artifact<Box<dyn io::Read>>> for ureq::Response {
 }
 
 fn main() {
-
     /*
     let mut fs_arc = FsArchive::new("my-archive".to_string()).unwrap();
 
@@ -328,18 +287,15 @@ fn main() {
         //"<tag1 attr=\"1\">hello<a href=\"asd\"><tag2 href=\"#hello\">world</tag2></a></tag1>".as_bytes());
         //"<tag1 attr=\"1\">hello<tag2 href=\"#hello\">world</tag2></tag1>".as_bytes());
         "<a href=\"1\"><a href=\"2\"><tag1 attr=\"1\">hello<tag2 href=\"#hello\">world</tag2></tag1></a></a>".as_bytes());
-        //"<tag1 attr=\"1\">hello</tag1>".as_bytes());
-        //"<tag2 attr=\"1\">hello</tag2>".as_bytes());
+    //"<tag1 attr=\"1\">hello</tag1>".as_bytes());
+    //"<tag2 attr=\"1\">hello</tag2>".as_bytes());
 
     let r = EventReader::new(buf);
     let m = xml::Matcher::new(xml::Return::attributes())
         .tag_eq("tag1".to_string())
-        .and(xml::Matcher::new(xml::Return::attributes())
-           .tag_eq("tag2".to_string()))
-        .or(xml::Matcher::new(xml::Return::attributes())
-            .tag_eq("a".to_string()))
-        .or(xml::Matcher::new(xml::Return::attributes())
-            .tag_eq("tag2".to_string()))
+        .and(xml::Matcher::new(xml::Return::attributes()).tag_eq("tag2".to_string()))
+        .or(xml::Matcher::new(xml::Return::attributes()).tag_eq("a".to_string()))
+        .or(xml::Matcher::new(xml::Return::attributes()).tag_eq("tag2".to_string()))
         .wild();
 
     for val in m.matches(r) {
